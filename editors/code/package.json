@@ -2978,6 +2978,22 @@
             {
                 "title": "Runnables",
                 "properties": {
+                    "rust-analyzer.runnables.test.explorer.overrideCommand": {
+                        "markdownDescription": "Override the command used for running tests in the Test Explorer.\nThe first element of the array should be the program to execute (for example, `cargo`).\nThe command must produce libtest-compatible JSON output on stdout.\n\nUse the placeholders `${package}`, `${target_arg}`, `${target}`, `${test_path}`,\nand `${root}` to dynamically replace the package name,\ntarget option (such as `--lib` or `--test`), the target name,\nthe test filter path, and the workspace root path respectively.",
+                        "default": null,
+                        "type": [
+                            "null",
+                            "array"
+                        ],
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            {
+                "title": "Runnables",
+                "properties": {
                     "rust-analyzer.runnables.test.overrideCommand": {
                         "markdownDescription": "Override the command used for test runnables.\nThe first element of the array should be the program to execute (for example, `cargo`).\n\nUse the placeholders `${package}`, `${target_arg}`, `${target}`, `${executable_args}` to dynamically\nreplace the package name, target option (such as `--bin` or `--example`), the target name and\nthe arguments passed to test binary args (includes `rust-analyzer.runnables.extraTestBinaryArgs`).",
                         "default": null,

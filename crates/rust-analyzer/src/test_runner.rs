@@ -4,6 +4,7 @@
 use std::process::Command;
 
 use crossbeam_channel::Sender;
+use ide_db::FxHashMap;
 use paths::{AbsPath, Utf8Path};
 use project_model::TargetKind;
 use serde::Deserialize as _;
@@ -96,11 +97,19 @@ pub(crate) struct TestTarget {
     pub kind: TargetKind,
 }
 
-/// Configuration for the Test Explorer.
+/// Configuration for the Test Explorer, following the flycheck pattern.
 #[derive(Clone, Debug)]
-pub(crate) struct CargoTestConfig {
-    pub options: CargoOptions,
-    pub runner: TestRunnerKind,
+pub(crate) enum CargoTestConfig {
+    /// Default: rust-analyzer builds the `cargo test` / `cargo nextest run`
+    /// command itself based on `runner`.
+    Automatic { options: CargoOptions, runner: TestRunnerKind },
+    /// User provides the entire command via `runnables.test.explorer.overrideCommand`.
+    /// The command must produce libtest-compatible JSON output on stdout.
+    CustomCommand {
+        command: String,
+        args: Vec<String>,
+        extra_env: FxHashMap<String, Option<String>>,
+    },
 }
 
 impl CargoTestHandle {
@@ -112,14 +121,14 @@ impl CargoTestHandle {
         test_target: TestTarget,
         sender: Sender<CargoTestMessage>,
     ) -> anyhow::Result<Self> {
-        let cmd = Self::automatic_command(
-            path,
-            config.options,
-            config.runner,
-            root,
-            ws_target_dir,
-            &test_target,
-        );
+        let cmd = match config {
+            CargoTestConfig::Automatic { options, runner } => {
+                Self::automatic_command(path, options, runner, root, ws_target_dir, &test_target)
+            }
+            CargoTestConfig::CustomCommand { command, args, extra_env } => {
+                Self::custom_command(path, command, args, extra_env, root, &test_target)
+            }
+        };
 
         Ok(Self {
             _handle: CommandHandle::spawn(
@@ -229,6 +238,77 @@ impl CargoTestHandle {
         if let Some(path) = path {
             cmd.arg(path);
         }
+        cmd
+    }
+
+    /// Constructs a custom command based on the provided configuration. Given we don't
+    /// know what are the arguments the custom command expects, we provide a set of variables
+    /// that can be used in the `args` field of the configuration:
+    ///
+    /// ### Arguments
+    /// - `${package}`: the name of the package being tested
+    /// - `${target_arg}`: the target kind (e.g. `--bin`, `--test`, etc.)
+    /// - `${target}`: the name of the target being tested (e.g. `my_test_bin`)
+    /// - `${test_path}`: the test path filter (if any) being used for this test run (e.g. `module::test_func`)
+    /// - `${root}`: the root path of the workspace being tested
+    ///
+    /// ### Example (settings.json)
+    /// ```json
+    /// "rust-analyzer.runnables.test.explorer.overrideCommand": [
+    ///     "cargo",
+    ///     "nextest",
+    ///     "run",
+    ///     "--no-fail-fast",
+    ///     "--message-format",
+    ///     "libtest-json",
+    ///     "--package",
+    ///     "${package}",
+    ///     "${target_arg}",
+    ///     "${target}",
+    ///     "--manifest-path",
+    ///     "${root}/Cargo.toml",
+    ///     "--",
+    ///     "${test_path}"
+    /// ]
+    /// ```
+    fn custom_command(
+        path: Option<&str>,
+        command: String,
+        args: Vec<String>,
+        extra_env: FxHashMap<String, Option<String>>,
+        root: &AbsPath,
+        test_target: &TestTarget,
+    ) -> Command {
+        let target_arg = match test_target.kind {
+            TargetKind::Bin => "--bin",
+            TargetKind::Test => "--test",
+            TargetKind::Bench => "--bench",
+            TargetKind::Example => "--example",
+            TargetKind::Lib { .. } => "--lib",
+            TargetKind::BuildScript | TargetKind::Other => "",
+        };
+
+        let target = match test_target.kind {
+            TargetKind::Bin | TargetKind::Test | TargetKind::Bench | TargetKind::Example => {
+                test_target.target.as_str()
+            }
+            _ => "",
+        };
+
+        let args: Vec<String> = args
+            .into_iter()
+            .map(|arg| {
+                arg.replace("${package}", &test_target.package)
+                    .replace("${target_arg}", target_arg)
+                    .replace("${target}", target)
+                    .replace("${test_path}", path.unwrap_or_default())
+                    .replace("${root}", root.as_str())
+            })
+            .filter(|a| !a.trim().is_empty())
+            .collect();
+
+        let mut cmd = toolchain::command(&command, root, &extra_env);
+        cmd.args(args);
         cmd
     }
 }

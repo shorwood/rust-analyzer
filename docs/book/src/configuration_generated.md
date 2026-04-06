@@ -1453,6 +1453,20 @@ Default: `"test"`
 Subcommand used for test runnables instead of `test`.
 
 
+## rust-analyzer.runnables.test.explorer.overrideCommand {#runnables.test.explorer.overrideCommand}
+
+Default: `null`
+
+Override the command used for running tests in the Test Explorer.
+The first element of the array should be the program to execute (for example, `cargo`).
+The command must produce libtest-compatible JSON output on stdout.
+
+Use the placeholders `${package}`, `${target_arg}`, `${target}`, `${test_path}`,
+and `${root}` to dynamically replace the package name,
+target option (such as `--lib` or `--test`), the target name,
+the test filter path, and the workspace root path respectively.
+
+
 ## rust-analyzer.runnables.test.overrideCommand {#runnables.test.overrideCommand}
 
 Default: `null`

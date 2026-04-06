@@ -984,6 +984,15 @@ config_data! {
         runnables_extraTestBinaryArgs: Vec<String> = vec!["--nocapture".to_owned()],
         /// Subcommand used for test runnables instead of `test`.
         runnables_test_command: String = "test".to_owned(),
+        /// Override the command used for running tests in the Test Explorer.
+        /// The first element of the array should be the program to execute (for example, `cargo`).
+        /// The command must produce libtest-compatible JSON output on stdout.
+        ///
+        /// Use the placeholders `${package}`, `${target_arg}`, `${target}`, `${test_path}`,
+        /// and `${root}` to dynamically replace the package name,
+        /// target option (such as `--lib` or `--test`), the target name,
+        /// the test filter path, and the workspace root path respectively.
+        runnables_test_explorer_overrideCommand: Option<Vec<String>> = None,
         /// Override the command used for test runnables.
         /// The first element of the array should be the program to execute (for example, `cargo`).
         ///
@@ -2538,33 +2547,46 @@ impl Config {
     }
 
     pub(crate) fn cargo_test_options(&self, source_root: Option<SourceRootId>) -> CargoTestConfig {
-        CargoTestConfig {
-            runner: *self.runnables_test_runner(source_root),
-            options: CargoOptions {
-                // Dead field in this context: `libtest_command` and
-                // `nextest_command` pass a hard-coded `&[&str]` to
-                // `cargo_base_command` and never read `options.subcommand`.
-                // We set it to "test" only because `CargoOptions` requires it.
-                subcommand: "test".to_owned(),
-                target_tuples: self.cargo_target(source_root).clone().into_iter().collect(),
-                all_targets: false,
-                no_default_features: *self.cargo_noDefaultFeatures(source_root),
-                all_features: matches!(
-                    self.cargo_features(source_root),
-                    CargoFeaturesDef::All
-                ),
-                features: match self.cargo_features(source_root).clone() {
-                    CargoFeaturesDef::All => vec![],
-                    CargoFeaturesDef::Selected(it) => it,
-                },
-                extra_args: self.extra_args(source_root).clone(),
-                extra_test_bin_args: self
-                    .runnables_extraTestBinaryArgs(source_root)
-                    .clone(),
-                extra_env: self.extra_env(source_root).clone(),
-                target_dir_config: self.target_dir_from_config(source_root),
-                set_test: true,
-            },
+        match &self.runnables_test_explorer_overrideCommand(source_root) {
+            Some(args) if !args.is_empty() => {
+                let mut args = args.clone();
+                let command = args.remove(0);
+                CargoTestConfig::CustomCommand {
+                    command,
+                    args,
+                    extra_env: self.extra_env(source_root).clone(),
+                }
+            }
+            Some(_) | None => {
+                CargoTestConfig::Automatic {
+                    runner: *self.runnables_test_runner(source_root),
+                    options: CargoOptions {
+                        // Dead field in this context: `libtest_command` and
+                        // `nextest_command` pass a hard-coded `&[&str]` to
+                        // `cargo_base_command` and never read `options.subcommand`.
+                        // We set it to "test" only because `CargoOptions` requires it.
+                        subcommand: "test".to_owned(),
+                        target_tuples: self.cargo_target(source_root).clone().into_iter().collect(),
+                        all_targets: false,
+                        no_default_features: *self.cargo_noDefaultFeatures(source_root),
+                        all_features: matches!(
+                            self.cargo_features(source_root),
+                            CargoFeaturesDef::All
+                        ),
+                        features: match self.cargo_features(source_root).clone() {
+                            CargoFeaturesDef::All => vec![],
+                            CargoFeaturesDef::Selected(it) => it,
+                        },
+                        extra_args: self.extra_args(source_root).clone(),
+                        extra_test_bin_args: self
+                            .runnables_extraTestBinaryArgs(source_root)
+                            .clone(),
+                        extra_env: self.extra_env(source_root).clone(),
+                        target_dir_config: self.target_dir_from_config(source_root),
+                        set_test: true,
+                    },
+                }
+            }
         }
     }
 
